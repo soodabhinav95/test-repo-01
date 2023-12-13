@@ -58,7 +58,7 @@ metadata:
   labels:
     app: minio
 spec:
-  replicas: 1
+  replicas: 2
   template:
     metadata:
       name: minio
