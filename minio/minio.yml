@@ -1,0 +1,127 @@
+# # Namespace
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: minio
+#   labels:
+#     name: minio
+
+# ---
+# # StorageClass
+# apiVersion: storage.k8s.io/v1
+# kind: StorageClass
+# metadata:
+#   name: retain-storage
+# provisioner: kubernetes.io/no-provisioner
+# reclaimPolicy: Retain
+# volumeBindingMode: WaitForFirstConsumer
+
+# Persistent Volume
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: minio-pv
+spec:
+  capacity:
+    storage: 10Gi # Adjust the storage size as needed
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: retain-storage
+  hostPath:
+    path: /mnt/minio-data/ # Update this to the actual path on the node
+
+---
+# Persistent Volume Claim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data-pvc
+  namespace: minio
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi # Should match the capacity in the PV
+  storageClassName: retain-storage
+  volumeName: minio-pv
+
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: minio
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  template:
+    metadata:
+      name: minio
+      labels:
+        app: minio
+    spec:
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: minio-data-pvc
+      containers:
+      - name: minio
+        image: quay.io/minio/minio:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MINIO_ROOT_USER
+          value: "minio"
+        - name: MINIO_ROOT_PASSWORD
+          value: "minio123"
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          initialDelaySeconds: 120
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+          initialDelaySeconds: 120
+          periodSeconds: 20
+        resources:
+          requests:
+            memory: "1000Mi"
+            cpu: "1000m"
+          limits:
+            memory: "1500Mi"
+            cpu: "1500m"
+        volumeMounts:
+        - mountPath: /data
+          name: data
+        command:
+        - /bin/bash
+        - -c
+        - minio server /data --console-address :9090
+      restartPolicy: Always
+  selector:
+    matchLabels:
+      app: minio
+
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: minio
+spec:
+  selector:
+    app: minio
+  ports:
+  - port: 9090
+    name: console
+  - port: 9000
+    name: s3
+  type: NodePort
